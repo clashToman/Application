@@ -22,7 +22,7 @@ async def login_form(form_data: LoginForm, request: Request):
     ):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    #request.session["USER"] = user.id
+    request.session["USER"] = user.id
 
     # Get the current date and time
     login_time = datetime.now().strftime(

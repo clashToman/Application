@@ -18,10 +18,10 @@ class Profile(BaseModel):
     password: str | None = None
 
 
-class ProducForm(BaseModel):
-    n_id: str
-    product_name: str
-    product_price: int
-    product_quantity: str
-    stock: int
-    category: str
+class ProductForm(BaseModel):
+    n_id: str | None = None
+    product_name: str | None = None
+    product_price: int | None = None
+    product_quantity: str | None = None
+    stock: int | None = None
+    category: str | None = None
