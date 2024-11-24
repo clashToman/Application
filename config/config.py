@@ -1,24 +1,24 @@
 import os
-from urllib.parse import quote_plus
-from pymongo import MongoClient
+from pymongo.mongo_client import MongoClient
 from fastapi_mail import ConnectionConfig
 from dotenv import load_dotenv
 
-# Load environment variables from a .env file
-load_dotenv()
+load_dotenv(
+    dotenv_path="C:\\Users\\PRAVEEN\\OneDrive\\Desktop\\App\\Application\\routes\\.env"
+)
+MONGO_URI = os.getenv("MONGO_URI")
 
-# Get MongoDB credentials from environment variables
-username = quote_plus(os.getenv("MONGO_USERNAME", "default_username"))
-password = quote_plus(os.getenv("MONGO_PASSWORD", "default_password"))
+if not MONGO_URI:
+    raise ValueError("Mongo URI is not set in the .env file!")
 
-# Construct the MongoDB URI with encoded username and password
-uri = f"mongodb+srv://{username}:{password}@cluster0.ztr6g.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 
 # Connect to MongoDB using pymongo
-client = MongoClient(uri)
+client = MongoClient(MONGO_URI)
+
 
 # Access the desired database
 db = client.get_database("myBlogs")
+
 
 # Collections
 user_collection = db["users"]
@@ -37,8 +37,17 @@ EMAIL_CONF = ConnectionConfig(
 )
 
 try:
-    # Test MongoDB connection
-    client.admin.command("ping")
+    # Connect to MongoDB
+    client = MongoClient(MONGO_URI)
+
+    # Access the desired database
+    db = client.get_database("myBlogs")
+
+    # Access collections
+    user_collection = db["users"]
+    product_collection = db["Product"]
+
     print("Connection successful...!")
-except Exception as e:
+
+except ConnectionError as e:
     print(f"Failed to connect to MongoDB: {e}")

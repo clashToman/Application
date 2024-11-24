@@ -29,7 +29,9 @@ async def send_otp(email_request: EmailRequest):
 
     # Validate email format
     if not validate_email(email):
-        raise HTTPException(status_code=400, detail="Invalid email format")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid email format"
+        )
 
     try:
         # Check if the user already exists and is verified
@@ -73,7 +75,10 @@ async def send_otp(email_request: EmailRequest):
             await fast_mail.send_message(message)
         except Exception as e:
             logger.error(f"Failed to send email: {str(e)}")
-            raise HTTPException(status_code=500, detail="Failed to send email")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to send email",
+            )
 
         return {"message": "OTP sent to your email"}
 
@@ -102,7 +107,9 @@ async def verify_otp(otp_request: OtpVerfication):
 
         # Check if OTP exists and matches
         if not user.get("otp") or user["otp"] != otp:
-            raise HTTPException(status_code=400, detail="Invalid OTP")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid OTP"
+            )
 
         # Check if OTP is expired
         if user.get("otp_expiry") and user["otp_expiry"] < datetime.utcnow():

@@ -9,11 +9,13 @@ class RegisterForm(BaseModel):
     phone: int
     age: Optional[int] = None
 
+
 class ProfileUpdate(BaseModel):
     name: Optional[str] = None
     address: Optional[str] = None
     phone: Optional[int] = None
     age: Optional[int] = None
+
 
 class OtpVerfication(BaseModel):
     email: EmailStr

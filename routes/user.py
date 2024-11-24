@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException, Query, status
-from models.model import RegisterForm,ProfileUpdate
+from models.model import RegisterForm, ProfileUpdate
 from datetime import datetime
 from config.config import user_collection
-from bson import ObjectId
+from bson.objectid import ObjectId
 
 
 # Create a router for user-related routes
@@ -10,9 +10,7 @@ user = APIRouter()
 
 
 @user.post("/register-form")
-async def register_form(
-    user: RegisterForm,  # RegisterForm is a Pydantic model containing the fields
-):
+async def register_form(user: RegisterForm):
     # Check if the user exists and is verified
     user_data = user_collection.find_one({"email": user.email})
 
@@ -53,7 +51,9 @@ async def update_profile(
         # Convert the user_id string to ObjectId
         user_object_id = ObjectId(user_id)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid user ID format{e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid user ID format{e}"
+        )
 
     # Check if the user exists in the database
     user = user_collection.find_one({"_id": user_object_id})  # Use ObjectId here
@@ -65,18 +65,26 @@ async def update_profile(
     update_fields = {k: v for k, v in user_data.dict().items() if v is not None}
 
     if not update_fields:
-        raise HTTPException(status_code=400, detail="No fields to update")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update"
+        )
 
     # Update the user document in MongoDB
     result = user_collection.update_one(
         {"_id": user_object_id},  # Match the user by ObjectId
-        {"$set": update_fields, "$currentDate": {"updated_at": True}}  # Update the fields and add current date
+        {
+            "$set": update_fields,
+            "$currentDate": {"updated_at": True},
+        },  # Update the fields and add current date
     )
 
     if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
 
     return {"message": "User profile updated successfully!"}
+
 
 @user.get("/users")
 async def get_users(
@@ -112,7 +120,9 @@ async def get_users(
             user_collection.find({}, {"_id": 0})
         )  # Exclude '_id' from response if not needed
         if not users:
-            raise HTTPException(status_code=404, detail="No users found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="No users found"
+            )
         return {"users": users}
 
     except Exception as e:
