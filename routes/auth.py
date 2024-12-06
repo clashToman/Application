@@ -139,3 +139,4 @@ async def verify_otp(otp_request: OtpVerfication):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal Server Error",
         )
+        

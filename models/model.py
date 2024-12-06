@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional,List
 from pydantic import BaseModel, EmailStr
 
 
@@ -33,3 +33,14 @@ class ProducForm(BaseModel):
     product_quantity: str
     stock: int
     category: str
+
+
+class orderItem(BaseModel):
+    product_name : str
+    quantity : int
+    
+class Order(BaseModel):
+    full_name : str
+    items : List[orderItem]    
+
+    
