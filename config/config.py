@@ -24,6 +24,7 @@ db = client.get_database("myBlogs")
 user_collection = db["users"]
 product_collection = db["Product"]
 orders_collection = db["orders"]
+history_collection = db["History"]
 
 # Email configuration from environment variables
 EMAIL_CONF = ConnectionConfig(

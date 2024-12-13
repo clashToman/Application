@@ -42,5 +42,14 @@ class orderItem(BaseModel):
 class Order(BaseModel):
     full_name : str
     items : List[orderItem]    
+    
+class Order_status(BaseModel):
+    status:str    
+    
+
+#Admin Dashboard
+class Category(BaseModel):
+    name:str
+    
 
     
