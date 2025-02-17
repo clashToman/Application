@@ -1,6 +1,7 @@
-fastapi           0.115.5
-uvicorn           0.22.0
-pymongo           4.6.0
-email-validator   2.1.0
-python-dotenv     1.0.0
-fastapi-mail      1.4.1
+fastapi           
+uvicorn           
+pymongo           
+email-validator   
+python-dotenv     
+fastapi-mail      
+jwt
