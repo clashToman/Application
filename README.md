@@ -19,9 +19,9 @@ This project is a FastAPI-based application for managing orders, products, and u
 ```bash
 python3 -m venv env
 ```
- -m is stands for "module".
- venv is the built-in python module used to create virtual environment.
- env is that name of the "venv" folder name, can we use any name for this folder
+ * -m is stands for "module".
+ * venv is the built-in python module used to create virtual environment.
+ * env is that name of the "venv" folder name, can we use any name for this folder
 
 ```bash
 env/activate/scrptis
