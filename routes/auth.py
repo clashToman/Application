@@ -1,142 +1,135 @@
-from fastapi import APIRouter, HTTPException, status
-from config.config import user_collection, EMAIL_CONF
+from fastapi import APIRouter, HTTPException, status,Depends
+from fastapi.security import OAuth2PasswordBearer
+from config.config import user_collection, EMAIL_CONF, SECRET_KEY, ALGORITHM
 from fastapi_mail import FastMail, MessageSchema
 from datetime import datetime, timedelta
-from models.model import EmailRequest, OtpVerfication
+from jose import jwt, JWTError
 import random
 import re
-import logging
+from models.model import EmailRequest, OtpVerification
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Initialize router and email client
 router = APIRouter()
 fast_mail = FastMail(EMAIL_CONF)
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
 
+# Helper function to generate user ID (like user1, user2)
+def generate_user_id():
+    last_user = user_collection.find_one({}, sort=[("user_id", -1)])
+    if last_user and "user_id" in last_user:
+        last_id = int(last_user["user_id"].replace("user", ""))
+        return f"user{last_id + 1}"
+    return "user1"
 
 # Utility function for email validation
 def validate_email(email: str) -> bool:
     email_regex = r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"
     return re.match(email_regex, email) is not None
 
+# Generate Access Token
+def create_access_token(data: dict):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(hours=1)
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-# Generate and send OTP
+# Decode Token
+def decode_token(token: str):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return payload.get("sub")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+def get_current_user(token: str = Depends(oauth2_scheme)):
+    email = decode_token(token)
+    if email is None:
+        raise HTTPException(status_code=401, detail="Could not validate credentials")
+
+    user = user_collection.find_one({"email": email}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Add "sub" key for compatibility with order placement logic
+    user["sub"] = email
+    return user
+
+
+# Send OTP (with bypass for existing users)
 @router.post("/send-otp")
-async def send_otp(email_request: EmailRequest):
-    email = email_request.email
+async def send_otp(request: EmailRequest):
+    email = request.email
 
     # Validate email format
     if not validate_email(email):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid email format"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid email format")
 
-    try:
-        # Check if the user already exists and is verified
-        user = user_collection.find_one({"email": email})
-        if user and user.get("is_verified", False):
-            return {"message": "You are already our client!"}
+    user = user_collection.find_one({"email": email})
 
-        # Generate a 6-digit OTP
+    if user:
+        # Existing user: Skip OTP, directly issue access token
+        username = user.get("username", "User")
+        access_token = create_access_token({"sub": email})
+        return {
+            "message": f"Welcome back, {username}!",
+            "access_token": access_token,
+            "token_type": "bearer"
+        }
+    else:
+        # New user: Generate OTP and send it
         otp = random.randint(100000, 999999)
+        expiry_time = datetime.utcnow() + timedelta(minutes=5)
+        user_collection.insert_one({"email": email, "otp": otp, "otp_expiry": expiry_time})
 
-        # Update or create user in the database
-        if not user:
-            user = {
-                "email": email,
-                "username": f"user_{random.randint(1000, 9999)}",
-                "created_at": datetime.utcnow(),
-                "is_verified": False,  # Add a verification status field
-            }
-            user_collection.insert_one(user)
+        message_text = f"Your OTP code is: {otp}. It expires in 5 minutes."
 
-        user_collection.update_one(
-            {"email": email},
-            {
-                "$set": {
-                    "otp": otp,
-                    "otp_expiry": datetime.utcnow() + timedelta(minutes=5),
-                }
-            },
-        )
-
-        # Prepare the email
+        # Send OTP via email
         message = MessageSchema(
             subject="Your OTP Code",
             recipients=[email],
-            body=f"Hello,\n\nYour OTP code is: {otp}\n\nThis code will expire in 5 minutes.",
-            subtype="plain",  # type:ignore
+            body=message_text,
+            subtype="plain"#type:ignore
         )
+        await fast_mail.send_message(message)
 
-        # Send the email
-        try:
-            await fast_mail.send_message(message)
-        except Exception as e:
-            logger.error(f"Failed to send email: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to send email",
-            )
-
-        return {"message": "OTP sent to your email"}
-
-    except Exception as e:
-        logger.error(f"Error occurred: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal Server Error")
+        return {"message": "OTP sent successfully"}
 
 
-# Verify OTP
+# Verify OTP and create user if new
 @router.post("/verify-otp")
-async def verify_otp(otp_request: OtpVerfication):
-    email = otp_request.email
-    otp = otp_request.otp
+async def verify_otp(request: OtpVerification):
+    user = user_collection.find_one({"email": request.email})
+    if not user or user.get("otp") != request.otp or user.get("otp_expiry") < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="Invalid or expired OTP")
 
-    try:
-        # Check if the user exists in the database
-        user = user_collection.find_one({"email": email})
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Email not registered"
-            )
+    # Clear OTP after successful verification
+    user_collection.update_one({"email": request.email}, {"$unset": {"otp": "", "otp_expiry": ""}})
 
-        # Check if the user is already verified
-        if user.get("is_verified", False):
-            return {"message": "You are already our client!"}
+    # Mark user as verified
+    user_collection.update_one({"email": request.email}, {"$set": {"is_verified": True}})
 
-        # Check if OTP exists and matches
-        if not user.get("otp") or user["otp"] != otp:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid OTP"
-            )
-
-        # Check if OTP is expired
-        if user.get("otp_expiry") and user["otp_expiry"] < datetime.utcnow():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="OTP expired"
-            )
-
-        # Mark user as verified and clear OTP
+    # Create user if it doesn't exist
+    if "user_id" not in user:
+        new_user_id = generate_user_id()
         user_collection.update_one(
-            {"email": email},
-            {
-                "$set": {"is_verified": True},
-                "$unset": {"otp": "", "otp_expiry": ""},
-            },
+            {"email": request.email},
+            {"$set": {
+                "user_id": new_user_id,
+                "username": request.email.split("@")[0],
+                "role": "user",
+                "is_verified": True
+            }}
         )
 
-        logger.info(f"OTP verified successfully for {email}")
-        return {
-            "message": "Login successful",
-            "user": {"username": user["username"], "email": user["email"]},
-        }
+    # Generate access token
+    access_token = create_access_token({"sub": request.email})
 
-    except Exception as e:
-        # Log the error and raise a 500 Internal Server Error
-        logger.error(f"Error occurred: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal Server Error",
-        )
-        
+    # Home page URL
+    home_url = "https://yourdomain.com/home"
+
+    return {
+        "verified": True,
+        "access_token": access_token,
+        "token_type": "bearer",
+        "redirect_url": home_url,
+        "message": "User verified successfully"
+    }

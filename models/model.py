@@ -1,55 +1,101 @@
-from typing import Optional,List
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, Field, EmailStr, constr
+from typing import List, Optional
+from datetime import datetime
 
 
-class RegisterForm(BaseModel):
-    email: EmailStr
+# 1. User Model
+class User(BaseModel):
+    user_id: constr(pattern="^user\d+$") = Field(...) #type:ignore # Pattern like user1, user2, etc.
+    username: str = Field(..., min_length=3, max_length=50)
+    phone_number: str = Field(...)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+# 2. Product Model
+class Product(BaseModel):
+    product_id: str
     name: str
-    address: str
-    phone: int
-    age: Optional[int] = None
+    category_id: str
+    price: float
+    stock: int
+    description: str
 
+# 3. Order Item Model
+class OrderItem(BaseModel):
+    product_id: str
+    product_name: str
+    quantity: int
+    price: float
 
-class ProfileUpdate(BaseModel):
-    name: Optional[str] = None
-    address: Optional[str] = None
-    phone: Optional[int] = None
-    age: Optional[int] = None
+# 4. Order Model
 
+class Order(BaseModel):
+    order_id: str
+    product_id: str
+    quantity: int
+    category: str
+    total_price: float
+    status: str = Field(default="pending")
+    order_date: datetime = Field(default_factory=datetime.utcnow)
 
-class OtpVerfication(BaseModel):
+# 5. Order History Model
+class OrderHistory(BaseModel):
+    user_id: str
+    order_id: str
+    items: List[OrderItem]
+    total_price: float
+    status: str
+    order_date: datetime
+
+# 6. Subscription Model
+class Subscription(BaseModel):
+    user_id: str
+    product_id: str
+    quantity: int
+    frequency: str  # daily, weekly, monthly
+    next_delivery_date: datetime
+
+# 7. Email Request Model
+class EmailRequest(BaseModel):
+    email: EmailStr
+
+# 8. OTP Verification Model
+class OtpVerification(BaseModel):
     email: EmailStr
     otp: int
 
+# 9. Profile Update Model
+class ProfileUpdate(BaseModel):
+    username: Optional[str] = None
+    phone_number: Optional[str] = None
+    address: Optional[str] = None
+    age: Optional[int] = None
+    gender: Optional[str] = None
 
-class EmailRequest(BaseModel):
+class RegisterForm(BaseModel):
+    full_name: str
+    phone_number: str
     email: str
+    age:int
+    gender:str
 
+class OrderStatus(BaseModel):
+    status: str
 
-class ProducForm(BaseModel):
-    n_id: str
-    product_name: str
-    product_price: int
-    product_quantity: str
-    stock: int
-    category: str
-
-
-class orderItem(BaseModel):
-    product_name : str
-    quantity : int
-    
-class Order(BaseModel):
-    full_name : str
-    items : List[orderItem]    
-    
-class Order_status(BaseModel):
-    status:str    
-    
-
-#Admin Dashboard
+# 10. Category Model
 class Category(BaseModel):
-    name:str
-    
+    category_id: constr(pattern="^category\d+$") = Field(...)#type:ignore  # Pattern like category1, category2, etc.
+    name: str = Field(..., min_length=2, max_length=50)
 
-    
+
+# --------------------
+# MongoDB Optimization
+# --------------------
+def create_indexes(db):
+    db.users.create_index("phone_number", unique=True)
+    db.products.create_index("category")
+    db.orders.create_index("user_id")
+    db.orders.create_index("order_date")
+    db.order_history.create_index("user_id")
+    db.subscriptions.create_index("user_id")
+    db.users.create_index("otp")
+    print("Indexes created successfully")

@@ -3,9 +3,7 @@ from pymongo.mongo_client import MongoClient
 from fastapi_mail import ConnectionConfig
 from dotenv import load_dotenv
 
-load_dotenv(
-    dotenv_path="C:\\Users\\PRAVEEN\\OneDrive\\Desktop\\App\\Application\\routes\\.env"
-)
+load_dotenv("C:\\Users\\PRAVEEN\\OneDrive\\Desktop\\A\\.env")
 MONGO_URI = os.getenv("MONGO_URI")
 
 if not MONGO_URI:
@@ -23,8 +21,18 @@ db = client.get_database("myBlogs")
 # Collections
 user_collection = db["users"]
 product_collection = db["Product"]
-orders_collection = db["orders"]
-history_collection = db["History"]
+order_collection = db["orders"]
+order_history_collection = db["History"]
+category_collection = db["category_Collection"]
+subscription_collection = db["subscriptions_Collection"]
+
+
+SECRET_KEY = "YOUR_SECRET_KEY"
+REFRESH_SECRET_KEY = "YOUR_REFRESH_SECRET"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
+REFRESH_TOKEN_EXPIRE_DAYS = 7
+
 
 # Email configuration from environment variables
 EMAIL_CONF = ConnectionConfig(
@@ -49,7 +57,7 @@ try:
     user_collection = db["users"]
     product_collection = db["Product"]
 
-    print("Connection successful...!")
+    print("✅ Connection successful...!")
 
 except ConnectionError as e:
     print(f"Failed to connect to MongoDB: {e}")

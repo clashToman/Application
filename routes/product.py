@@ -1,69 +1,34 @@
-from fastapi import APIRouter, HTTPException, status
-from models.model import ProducForm
+from fastapi import APIRouter, HTTPException
 from config.config import product_collection
-from typing import List, Optional
+from models.model import Product
 
-product = APIRouter()
+product_router = APIRouter()
 
+# Add Product
+@product_router.post("/add")
+def add_product(product: Product):
+    if product_collection.find_one({"product_id": product.product_id}):
+        raise HTTPException(status_code=400, detail="Product ID already exists")
+    product_collection.insert_one(product.dict())
+    return {"message": "Product added successfully"}
 
-@product.post("/product")
-async def register_product(stock: ProducForm):
-    try:
-        # Check if the product with the same n_id already exists in the given category
-        existing_product = product_collection.find_one(
-            {"n_id": stock.n_id, "category": stock.category}
-        )
-        if existing_product:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Product already exists in this category",
-            )
+# Get All Products
+@product_router.get("/")
+def get_all_products():
+    return list(product_collection.find({}, {"_id": 0}))
 
-        # Prepare the new product data
-        new_product = {
-            "n_id": stock.n_id,
-            "product_name": stock.product_name,
-            "product_price": stock.product_price,
-            "product_quantity": stock.product_quantity,
-            "stock": stock.stock,
-            "category": stock.category,
-        }
+# Update Product
+@product_router.put("/update/{product_id}")
+def update_product(product_id: str, product: Product):
+    result = product_collection.update_one({"product_id": product_id}, {"$set": product.dict()})
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return {"message": "Product updated successfully"}
 
-        # Insert the new product into the database
-        result = product_collection.insert_one(new_product)
-
-        return {
-            "message": "Product added successfully!",
-            "_id": str(result.inserted_id),
-        }
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal server error: {str(e)}",
-        )
-
-
-@product.get("/products", response_model=List[ProducForm])
-async def get_all_products(category: Optional[str] = None):
-    try:
-        # Query all products, or filter by category if provided
-        query = {"category": category} if category else {}
-        products = list(product_collection.find(query))
-
-        # Convert ObjectId to string for JSON compatibility
-        for product in products:
-            product["_id"] = str(product["_id"])
-
-        if not products:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="No products found"
-            )
-
-        return products
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal server error: {str(e)}",
-        )
+# Delete Product
+@product_router.delete("/delete/{product_id}")
+def delete_product(product_id: str):
+    result = product_collection.delete_one({"product_id": product_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return {"message": "Product deleted successfully"}

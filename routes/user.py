@@ -1,132 +1,59 @@
-from fastapi import APIRouter, HTTPException, Query, status
-from models.model import RegisterForm, ProfileUpdate
+from fastapi import FastAPI, APIRouter, HTTPException, Depends
+from config.config import  user_collection
+from models.model import  RegisterForm, ProfileUpdate
 from datetime import datetime
-from config.config import user_collection
-from bson.objectid import ObjectId
 
+from routes.auth import get_current_user
+import requests
 
-# Create a router for user-related routes
-user = APIRouter()
+app = FastAPI()
 
+# Helper function to get live location
+def get_live_location():
+    try:
+        response = requests.get("https://ipapi.co/json/")
+        if response.status_code == 200:
+            data = response.json()
+            city = data.get("city", "Unknown City")
+            region = data.get("region", "Unknown Region")
+            country = data.get("country_name", "Unknown Country")
+            postal = data.get("postal", "Unknown Postal Code")
+            return f"{city}, {region}, {country}, {postal}"
+        else:
+            return "Location unavailable"
+    except Exception as e:
+        return f"Error fetching location: {e}"
 
-@user.post("/register-form")
-async def register_form(user: RegisterForm):
-    # Check if the user exists and is verified
-    user_data = user_collection.find_one({"email": user.email})
+# User Router
+user_router = APIRouter()
 
-    if not user_data:
-        raise HTTPException(
-            status_code=404, detail="User not found. Please verify your email first."
-        )
-
-    if not user_data.get("is_verified", False):
-        raise HTTPException(
-            status_code=400,
-            detail="Email not verified. Please complete email verification.",
-        )
-
-    # If user exists and is verified, update their additional details
+@user_router.post("/register")
+def register_user(user: RegisterForm):
+    existing_user = user_collection.find_one({"email": user.email})
+    if not existing_user or not existing_user.get("is_verified"):
+        raise HTTPException(status_code=400, detail="Email not verified or user not found")
+    live_address = get_live_location()
     user_collection.update_one(
-        {"email": user.email},  # Match the user by email
-        {
-            "$set": {
-                "full_name": user.name,
-                "address": user.address,
-                "phone": user.phone,
-                "age": user.age,
-                "updated_at": datetime.utcnow(),
-            }
-        },
+        {"email": user.email},
+        {"$set": {
+            "full_name": user.full_name,
+            "address": live_address,
+            "phone_number": user.phone_number,
+            "age": user.age,
+            "updated_at": datetime.utcnow(),
+        }}
     )
+    return {"message": "User registered successfully", "address": live_address}
 
-    return {"message": "User details updated successfully!"}
-
-
-@user.patch("/update-profile/{user_id}")
-async def update_profile(
-    user_id: str,  # User ID passed directly in the URL path
-    user_data: ProfileUpdate,  # User data passed in the request body
-):
-    try:
-        # Convert the user_id string to ObjectId
-        user_object_id = ObjectId(user_id)
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid user ID format{e}"
-        )
-
-    # Check if the user exists in the database
-    user = user_collection.find_one({"_id": user_object_id})  # Use ObjectId here
-
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    # Prepare the fields to update (only the fields provided in the request)
+@user_router.patch("/update-profile")
+def update_profile(user_data: ProfileUpdate, current_user: dict = Depends(get_current_user)):
+    user_id = current_user.get("user_id")
     update_fields = {k: v for k, v in user_data.dict().items() if v is not None}
-
     if not update_fields:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update"
-        )
+        raise HTTPException(status_code=400, detail="No fields to update")
+    user_collection.update_one({"user_id": user_id}, {"$set": update_fields, "$currentDate": {"updated_at": True}})
+    return {"message": "Profile updated successfully"}
 
-    # Update the user document in MongoDB
-    result = user_collection.update_one(
-        {"_id": user_object_id},  # Match the user by ObjectId
-        {
-            "$set": update_fields,
-            "$currentDate": {"updated_at": True},
-        },  # Update the fields and add current date
-    )
-
-    if result.matched_count == 0:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-        )
-
-    return {"message": "User profile updated successfully!"}
-
-
-@user.get("/users")
-async def get_users(
-    user_id: str = Query(None, description="ID of the user to fetch (optional)"),
-):
-    """
-    Fetch all users if no user_id is provided.
-    Fetch a specific user if user_id is provided.
-    """
-    try:
-        if user_id:
-            # Convert user_id to ObjectId
-            try:
-                user_object_id = ObjectId(user_id)
-            except Exception:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Invalid user ID format",
-                )
-
-            # Fetch the specific user
-            user = user_collection.find_one(
-                {"_id": user_object_id}, {"_id": 0}
-            )  # Exclude '_id' from response if not needed
-            if not user:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-                )
-            return {"user": user}
-
-        # Fetch all users if no user_id is provided
-        users = list(
-            user_collection.find({}, {"_id": 0})
-        )  # Exclude '_id' from response if not needed
-        if not users:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="No users found"
-            )
-        return {"users": users}
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal server error: {str(e)}",
-        )
+@user_router.get("/me")
+def get_current_user_info(current_user: dict = Depends(get_current_user)):
+    return current_user

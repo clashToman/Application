@@ -1,180 +1,102 @@
-from fastapi import APIRouter, HTTPException, status
-from models.model import Order,Order_status
-from config.config import user_collection, product_collection, orders_collection, history_collection
-from bson import ObjectId
-import logging
+from fastapi import APIRouter, HTTPException, Depends
+from config.config import order_collection, product_collection, user_collection, order_history_collection
+from models.model import Order, OrderStatus
+from datetime import datetime
+from routes.auth import get_current_user
+from routes.user import get_live_location
 
+order_router = APIRouter()
 
-orders = APIRouter()
-logging.basicConfig(level=logging.INFO)
+# 1️⃣ Place Order for Current User
+@order_router.post("/my-orders/place_order")
+def place_order(order: Order, current_user: dict = Depends(get_current_user)):
+    # Validate product
+    product = product_collection.find_one({"product_id": order.product_id})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
 
-def object_id(obj_id: ObjectId):
-    return str(obj_id)
-
-async def get_current_user(full_name: str):
-    user = user_collection.find_one({"full_name": full_name})
+    # Validate user
+    user = user_collection.find_one({"email": current_user["email"]})
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not authenticated. Please log in to place an order.",
-        )
-    return user
+        raise HTTPException(status_code=404, detail="User not found")
 
-@orders.post("/orders")
-async def place_order(order: Order):
-    # Extract user details from the database using the full_name from the order body
-    user = user_collection.find_one({"full_name": order.full_name})
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not authenticated. Please log in to place an order.",
-        )
+    # Get live location
+    live_location = get_live_location()
 
-    user_address = user.get("address")
-    if not user_address:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Address not found for user '{user['full_name']}'.",
-        )
-
-    total_price = 0.0
-    updated_items = []
-
-    # Check if the user already has a pending order
-    existing_order = orders_collection.find_one({
-        "user_id": user["_id"],
-        "status": "Pending"
+    # Prepare and insert order
+    order_data = order.dict()
+    order_data.update({
+        "user_id": user["user_id"],
+        "order_date": datetime.utcnow(),
+        "status": "pending",
+        "location": live_location
     })
 
-    # Process items
-    for item in order.items:
-        logging.info(f"Looking for product: {item.product_name}")
-        product = product_collection.find_one({
-            "product_name": {"$regex": f"^{item.product_name}$", "$options": "i"}
-        })
-        if not product:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Product '{item.product_name}' not found.",
-            )
-        if product["stock"] < item.quantity:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Not enough stock for product '{product['product_name']}'. Available: {product['stock']}",
-            )
+    order_collection.insert_one(order_data)
+    order_history_collection.insert_one(order_data)
 
-        # Update stock
-        product_collection.update_one(
-            {"_id": product["_id"]},
-            {"$inc": {"stock": -item.quantity}}
-        )
+    return {"message": "Order placed successfully", "order_id": order.order_id, "location": live_location}
 
-        # Add item details to updated_items
-        updated_items.append({
-            "product_name": product["product_name"],
-            "quantity": item.quantity,
-            "price_per_unit": product["product_price"],
-            "total_price": product["product_price"] * item.quantity
-        })
 
-        # Update total price
-        total_price += product["product_price"] * item.quantity
+# 2️⃣ Get Orders of Current User
+@order_router.get("/my-orders")
+def get_current_user_orders(current_user: dict = Depends(get_current_user), category: str = None):#type:ignore
+    user_id = current_user.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
 
-    if existing_order:
-        # Update the existing order
-        orders_collection.update_one(
-            {"_id": existing_order["_id"]},
-            {
-                "$push": {"items": {"$each": updated_items}},  # Append new items
-                "$inc": {"total_price": total_price}          # Increment total price
-            }
-        )
-        order_id = object_id(existing_order["_id"])
-        message = "Existing order updated successfully."
-    else:
-        # Create a new order
-        order_dict = {
-            "user_id": user["_id"],
-            "full_name": user["full_name"],
-            "address": user_address,
-            "items": updated_items,
-            "total_price": total_price,
-            "status": "Pending",
-        }
-        result = orders_collection.insert_one(order_dict)
-        order_id = object_id(result.inserted_id) #type:ignore
-        message = "New order placed successfully."
+    query = {"user_id": user_id}
+    if category:
+        query["category"] = category
 
-    return {
-        "message": message,
-        "order_id": order_id,
-        "total_price": total_price,
-        "delivery_address": user_address,
-    }
+    orders = list(order_collection.find(query, {"_id": 0}))
+    if not orders:
+        raise HTTPException(status_code=404, detail="No orders found")
 
-@orders.put("/orders/{order_id}/status")
-async def update_order_status(order_id: str, order_status: Order_status):
-    order = orders_collection.find_one({"_id": ObjectId(order_id)})
+    return {"orders": orders}
+
+# Update Order Status and Handle Delivered Orders
+@order_router.put("/my-orders/update/{order_id}")
+def update_order_status(order_id: str, status_data: OrderStatus, current_user: dict = Depends(get_current_user)):
+    valid_statuses = {"shipped", "pending", "delivered"}
+    if status_data.status not in valid_statuses:
+        raise HTTPException(status_code=400, detail=f"Invalid status. Valid statuses: {', '.join(valid_statuses)}")
+
+    # Find the order
+    order = order_collection.find_one({"order_id": order_id, "user_id": current_user["user_id"]})
     if not order:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Order with ID {order_id} not found."
+        raise HTTPException(status_code=404, detail="Order not found or does not belong to the current user")
+
+    # Update the order status
+    order_collection.update_one({"order_id": order_id}, {"$set": {"status": status_data.status}})
+
+    # If the status is 'delivered', delete from order_collection and update order_history
+    if status_data.status == "delivered":
+        # Remove from order_collection
+        order_collection.delete_one({"order_id": order_id})
+
+        # Update order_history with status 'complete'
+        order["status"] = "complete"
+        order_history_collection.update_one(
+            {"order_id": order_id},
+            {"$set": order},
+            upsert=True
         )
 
-    if order_status.status not in ["Pending", "Completed", "Canceled"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid status. Allowed values are 'Pending', 'Completed', 'Canceled'."
-        )
+    return {"message": f"Order status updated to '{status_data.status}' successfully"}
 
-    # Update order status
-    orders_collection.update_one(
-        {"_id": ObjectId(order_id)},
-        {"$set": {"status": order_status.status}}
-    )
 
-    # If order is completed or canceled, move it to the order history
-    if order_status.status in ["Completed", "Canceled"]:
-        orders_collection.delete_one({"_id": ObjectId(order_id)})
-        order["status"] = order_status.status
-        history_collection.insert_one(order)
 
-    return {"message": f"Order status updated to '{order_status.status}'."}
+# 4️⃣ Delete Order for Current User
+@order_router.delete("/my-orders/delete/{order_id}")
+def delete_current_user_order(order_id: str, current_user: dict = Depends(get_current_user)):
+    user_id = current_user.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
 
-@orders.get("/orders/history/{user_id}")
-async def get_order_history(user_id: str):
-    try:
-        # Check if the user_id is a valid ObjectId
-        if not ObjectId.is_valid(user_id):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid user ID format."
-            )
+    # Ensure order belongs to the user
+    result = order_collection.delete_one({"order_id": order_id, "user_id": user_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Order not found or does not belong to the current user")
 
-        # Check if the user exists
-        user = user_collection.find_one({"_id": ObjectId(user_id)})
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found."
-            )
-
-        # Fetch order history for the user
-        history = history_collection.find({"user_id": ObjectId(user_id)})
-
-        # Convert the cursor to a list and transform ObjectId to string
-        history_list = [
-            {**doc, "_id": str(doc["_id"]), "user_id": str(doc["user_id"])}
-            for doc in history
-        ]
-
-        if not history_list:
-            return {"message": "No order history found for this user.", "order_history": []}
-
-        return {"order_history": history_list}
-    except Exception as e:
-        logging.error(f"Error fetching order history: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while fetching order history."
-        )
+    return {"message": "Order deleted successfully"}
