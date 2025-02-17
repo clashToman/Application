@@ -34,7 +34,7 @@ pip install -r requirements.txt
 ```bash
 pip list
 ```
-
+* To run the code:
 ```bash
 uvicorn main:app --reload
 ```
