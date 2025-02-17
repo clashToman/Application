@@ -12,6 +12,8 @@ This project is a FastAPI-based application for managing orders, products, and u
 
 ## Run the Project
 
+# Make a clone 
+
 * To create a environment to run the project
 
 ```bash
