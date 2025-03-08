@@ -24,7 +24,7 @@ python3 -m venv env
  * env is that name of the "venv" folder name, can we use any name for this folder
 
 ```bash
-env/activate/scrptis
+env\scripts\activate
 ```
 * After the activation need to install requirement file.
 
